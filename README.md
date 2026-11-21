@@ -1,13 +1,13 @@
-# is_peer_user_admission
+# is_unix_socket_user_check
 
-Decides whether the user on the other end of a Unix-domain socket may in, from
+Decides whether the user on the other end of a Unix-domain socket may connect, from
 the kernel's peer credentials: Linux's `SO_PEERCRED`, macOS's `LOCAL_PEERCRED`.
 
 ```dart
-final admission = PeerUserAdmission.only(UserId.parse(caller)!);
+final check = SocketUserCheck.only(UserId.parse(caller)!);
 
 Future<void> serve(Socket socket) async {
-  if (!admission.admits(socket)) {
+  if (!check.allows(socket)) {
     socket.destroy();
     return;
   }
@@ -17,7 +17,7 @@ Future<void> serve(Socket socket) async {
 
 ## Unknown is denied
 
-There is no nullable uid to compare. `admits` is false whenever the user cannot
+There is no nullable uid to compare. `allows` is false whenever the user cannot
 be read: another kernel, a failed `getsockopt`, a short answer, an unknown
 `xucred` version.
 
@@ -38,14 +38,14 @@ The option buffer starts as all ones, so a uid the kernel never wrote reads as
 
 ## A user per sender
 
-When the decision depends on who the user is, not only on whether they may in,
-read the user with `PeerUserReader.userOf` and key the table by `UserId`.
+When the decision depends on who the user is, not only on whether they may connect,
+read the user with `SocketUserReader.userOf` and key the table by `UserId`.
 `userOf` returns `UserId?`, and a table keyed by `UserId` cannot be asked about
 null.
 
 ## Tests
 
-`PeerUserReader` takes the socket read and the `/proc` read as functions, so a
+`SocketUserReader` takes the socket read and the `/proc` read as functions, so a
 test can fake the kernel's answer. One test reads the running kernel's answer
 for a real socket pair.
 

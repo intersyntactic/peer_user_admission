@@ -1,7 +1,7 @@
 import 'dart:io';
 import 'dart:typed_data';
 
-import 'package:is_peer_user_admission/is_peer_user_admission.dart';
+import 'package:is_unix_socket_user_check/is_unix_socket_user_check.dart';
 import 'package:test/test.dart';
 
 /// A struct of [length] bytes with [first] then [uid] as host-order u32s.
@@ -14,11 +14,11 @@ Uint8List struct(int length, {required int first, required int uid}) {
 }
 
 /// A reader that answers every option read with [bytes].
-PeerUserReader answering(
+SocketUserReader answering(
   Kernel kernel,
   Uint8List bytes, {
   int? overflowUid = 65534,
-}) => PeerUserReader(
+}) => SocketUserReader(
   kernel: kernel,
   readOption: (_, _) => bytes,
   overflowUid: () => overflowUid,
@@ -30,7 +30,7 @@ void main() {
   late Socket client;
 
   setUp(() async {
-    directory = await Directory.systemTemp.createTemp('peer_user_admission');
+    directory = await Directory.systemTemp.createTemp('unix_socket_user_check');
     final address = InternetAddress(
       '${directory.path}/socket',
       type: InternetAddressType.unix,
@@ -64,7 +64,7 @@ void main() {
     });
   });
 
-  group('PeerUserReader on Linux', () {
+  group('SocketUserReader on Linux', () {
     test('reads the uid after the pid', () {
       final reader = answering(Kernel.linux, struct(12, first: 42, uid: 1000));
       expect(reader.userOf(client), UserId.parse(1000));
@@ -98,7 +98,7 @@ void main() {
     });
 
     test('reads an untouched buffer as (uid_t)-1, never root', () {
-      final reader = PeerUserReader(
+      final reader = SocketUserReader(
         kernel: Kernel.linux,
         readOption: (_, option) => option.value,
         overflowUid: () => 65534,
@@ -107,7 +107,7 @@ void main() {
     });
 
     test('denies when the read throws', () {
-      final reader = PeerUserReader(
+      final reader = SocketUserReader(
         kernel: Kernel.linux,
         readOption: (_, _) => throw const SocketException('no peer'),
       );
@@ -115,7 +115,7 @@ void main() {
     });
   });
 
-  group('PeerUserReader on macOS', () {
+  group('SocketUserReader on macOS', () {
     test('reads the uid after the version', () {
       final reader = answering(Kernel.macos, struct(76, first: 0, uid: 501));
       expect(reader.userOf(client), UserId.parse(501));
@@ -136,51 +136,54 @@ void main() {
   });
 
   test('another kernel is denied without a read', () {
-    final reader = PeerUserReader(
+    final reader = SocketUserReader(
       kernel: Kernel.other,
       readOption: (_, _) => fail('read on an unknown kernel'),
     );
     expect(reader.userOf(client), isNull);
   });
 
-  group('PeerUserAdmission', () {
+  group('SocketUserCheck', () {
     final me = UserId.parse(1000)!;
 
-    test('admits an allowed user', () {
-      final admission = PeerUserAdmission.only(
+    test('allows an allowed user', () {
+      final check = SocketUserCheck.only(
         me,
         reader: answering(Kernel.linux, struct(12, first: 1, uid: 1000)),
       );
-      expect(admission.admits(client), isTrue);
+      expect(check.allows(client), isTrue);
     });
 
     test('denies another user', () {
-      final admission = PeerUserAdmission.only(
+      final check = SocketUserCheck.only(
         me,
         reader: answering(Kernel.linux, struct(12, first: 1, uid: 1001)),
       );
-      expect(admission.admits(client), isFalse);
+      expect(check.allows(client), isFalse);
     });
 
     test('denies a peer whose user cannot be read', () {
-      final admission = PeerUserAdmission.only(
+      final check = SocketUserCheck.only(
         me,
         reader: answering(Kernel.linux, Uint8List(0)),
       );
-      expect(admission.admits(client), isFalse);
+      expect(check.allows(client), isFalse);
     });
   });
 
-  test('the running kernel names this process as the peer', () async {
-    final result = await Process.run('id', ['-u']);
-    final uid = int.parse(
-      (result.stdout as String).trim(),
-    ); // cast-ok: Process.run decodes stdout to a String by default.
-    if (Kernel.current == Kernel.other) {
-      markTestSkipped('peer credentials are only read on Linux and macOS');
-      return;
-    }
-    expect(PeerUserReader().userOf(client), UserId.parse(uid));
-    expect(PeerUserAdmission.only(UserId.parse(uid)!).admits(client), isTrue);
-  });
+  test(
+    'the running kernel names this process as the user on the other end',
+    () async {
+      final result = await Process.run('id', ['-u']);
+      final uid = int.parse(
+        (result.stdout as String).trim(),
+      ); // cast-ok: Process.run decodes stdout to a String by default.
+      if (Kernel.current == Kernel.other) {
+        markTestSkipped('peer credentials are only read on Linux and macOS');
+        return;
+      }
+      expect(SocketUserReader().userOf(client), UserId.parse(uid));
+      expect(SocketUserCheck.only(UserId.parse(uid)!).allows(client), isTrue);
+    },
+  );
 }

@@ -3,7 +3,7 @@ import 'dart:typed_data';
 
 import 'user_id.dart';
 
-/// The kernels whose peer credentials [PeerUserReader] knows how to read.
+/// The kernels whose peer credentials [SocketUserReader] knows how to read.
 enum Kernel {
   linux,
   macos,
@@ -39,11 +39,11 @@ int? _linuxOverflowUid() {
 
 /// Reads the user on the other end of a Unix-domain socket from the kernel:
 /// Linux's `SO_PEERCRED`, macOS's `LOCAL_PEERCRED`.
-final class PeerUserReader {
+final class SocketUserReader {
   /// A reader for [kernel], the running one by default. [readOption] and
   /// [overflowUid] are the socket and `/proc` reads, passed in so a test can
   /// fake them.
-  PeerUserReader({
+  SocketUserReader({
     Kernel? kernel,
     this._readOption = _getRawOption,
     this._overflowUid = _linuxOverflowUid,

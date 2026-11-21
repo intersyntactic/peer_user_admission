@@ -2,4 +2,4 @@
 
 ## 0.1.0
 
-- First release: `UserId`, `PeerUserReader` and `PeerUserAdmission`.
+- First release: `UserId`, `SocketUserReader` and `SocketUserCheck`.
