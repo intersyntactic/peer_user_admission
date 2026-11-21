@@ -1,0 +1,14 @@
+name: is_peer_user_admission
+description: >-
+  Decides whether the user on the other end of a Unix-domain socket may in,
+  from the kernel's peer credentials. A peer whose user cannot be read is
+  denied, and the overflow uid can never be in an allow list.
+version: 0.1.0
+repository: https://github.com/intersyntactic/peer_user_admission
+
+environment:
+  sdk: ^3.13.0
+
+dev_dependencies:
+  lints: ^6.1.0
+  test: ^1.33.0
