@@ -59,6 +59,7 @@ void main() {
 
     test('refuses numbers outside uid_t', () {
       expect(UserId.parse(-1), isNull);
+      expect(UserId.parse(-2), isNull);
       expect(UserId.parse(4294967296), isNull);
     });
   });

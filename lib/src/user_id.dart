@@ -7,7 +7,9 @@
 /// - 4294967294, macOS's `nobody`;
 /// - 4294967295, `(uid_t)-1`, which Linux reports for a peer with no
 ///   credentials;
-/// - anything outside `uid_t`'s 32 bits.
+/// - anything outside `uid_t`'s 32 bits, which includes -2 and -1, the
+///   signed forms of the two above that tools such as macOS's `id -u nobody`
+///   print.
 ///
 /// So none of them can be in an allow list built from [UserId]s.
 final class UserId {
