@@ -3,7 +3,7 @@ description: >-
   Decides whether the user on the other end of a Unix-domain socket may connect,
   from the kernel's peer credentials. A peer whose user cannot be read is
   denied, and the overflow uid can never be in an allow list.
-version: 0.2.0
+version: 0.2.1
 repository: https://github.com/intersyntactic/unix_socket_user_check
 
 environment:

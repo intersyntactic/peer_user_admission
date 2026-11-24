@@ -161,6 +161,33 @@ void main() {
     });
   });
 
+  test('every reason prints on one line, even an OS message with breaks', () {
+    const reasons = <WhyUnread>[
+      UnsupportedKernel(),
+      ReadFailed(
+        SocketException(
+          'getsockopt\nfailed',
+          osError: OSError('Bad file\r\ndescriptor\u2028here', 9),
+        ),
+      ),
+      ShortAnswer(length: 4, expected: 12),
+      OverflowUid(65534),
+      UnknownXucredVersion(1),
+      RefusedUid(4294967295),
+    ];
+    for (final why in reasons) {
+      final line = '${Unread(why)}';
+      expect(line, isNot(matches(RegExp('[\n\r\v\f\u0085\u2028\u2029]'))));
+    }
+    expect(
+      '${reasons[1]}',
+      allOf(
+        contains('getsockopt failed'),
+        contains('Bad file descriptor here'),
+      ),
+    );
+  });
+
   group('SocketUserReader on macOS', () {
     test('reads the uid after the version', () {
       final reader = answering(Kernel.macos, struct(76, first: 0, uid: 501));
