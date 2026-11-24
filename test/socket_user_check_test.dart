@@ -24,6 +24,13 @@ SocketUserReader answering(
   overflowUid: () => overflowUid,
 );
 
+/// A reading of the user [uid].
+Matcher isUserRead(int uid) =>
+    isA<UserRead>().having((r) => r.user, 'user', UserId.parse(uid));
+
+/// An [Unread] whose reason matches [why].
+Matcher isUnread(Matcher why) => isA<Unread>().having((u) => u.why, 'why', why);
+
 void main() {
   late Directory directory;
   late ServerSocket server;
@@ -67,34 +74,62 @@ void main() {
   group('SocketUserReader on Linux', () {
     test('reads the uid after the pid', () {
       final reader = answering(Kernel.linux, struct(12, first: 42, uid: 1000));
-      expect(reader.userOf(client), UserId.parse(1000));
+      expect(reader.read(client), isUserRead(1000));
     });
 
-    test('denies the overflow uid', () {
+    test('names the overflow uid', () {
       final reader = answering(Kernel.linux, struct(12, first: 42, uid: 65534));
-      expect(reader.userOf(client), isNull);
+      expect(
+        reader.read(client),
+        isUnread(isA<OverflowUid>().having((w) => w.uid, 'uid', 65534)),
+      );
     });
 
-    test('denies a configured overflow uid that is not 65534', () {
+    test('names a configured overflow uid that is not 65534', () {
       final reader = answering(
         Kernel.linux,
         struct(12, first: 42, uid: 2000),
         overflowUid: 2000,
       );
-      expect(reader.userOf(client), isNull);
+      expect(
+        reader.read(client),
+        isUnread(isA<OverflowUid>().having((w) => w.uid, 'uid', 2000)),
+      );
     });
 
-    test('denies a peer with no credentials', () {
+    test('refuses 65534 when the overflow uid cannot be read', () {
+      final reader = answering(
+        Kernel.linux,
+        struct(12, first: 42, uid: 65534),
+        overflowUid: null,
+      );
+      expect(
+        reader.read(client),
+        isUnread(isA<RefusedUid>().having((w) => w.uid, 'uid', 65534)),
+      );
+    });
+
+    test('refuses a peer with no credentials', () {
       final reader = answering(
         Kernel.linux,
         struct(12, first: 0, uid: 4294967295),
       );
-      expect(reader.userOf(client), isNull);
+      expect(
+        reader.read(client),
+        isUnread(isA<RefusedUid>().having((w) => w.uid, 'uid', 4294967295)),
+      );
     });
 
-    test('denies a short answer', () {
+    test('names a short answer and its length', () {
       final reader = answering(Kernel.linux, Uint8List(4));
-      expect(reader.userOf(client), isNull);
+      expect(
+        reader.read(client),
+        isUnread(
+          isA<ShortAnswer>()
+              .having((w) => w.length, 'length', 4)
+              .having((w) => w.expected, 'expected', 12),
+        ),
+      );
     });
 
     test('reads an untouched buffer as (uid_t)-1, never root', () {
@@ -103,71 +138,124 @@ void main() {
         readOption: (_, option) => option.value,
         overflowUid: () => 65534,
       );
-      expect(reader.userOf(client), isNull);
+      expect(
+        reader.read(client),
+        isUnread(isA<RefusedUid>().having((w) => w.uid, 'uid', 4294967295)),
+      );
     });
 
-    test('denies when the read throws', () {
+    test('carries the OSError when the read throws', () {
       final reader = SocketUserReader(
         kernel: Kernel.linux,
-        readOption: (_, _) => throw const SocketException('no peer'),
+        readOption: (_, _) => throw const SocketException(
+          'getsockopt',
+          osError: OSError('Bad file descriptor', 9),
+        ),
       );
-      expect(reader.userOf(client), isNull);
+      expect(
+        reader.read(client),
+        isUnread(
+          isA<ReadFailed>().having((w) => w.osError?.errorCode, 'errno', 9),
+        ),
+      );
     });
   });
 
   group('SocketUserReader on macOS', () {
     test('reads the uid after the version', () {
       final reader = answering(Kernel.macos, struct(76, first: 0, uid: 501));
-      expect(reader.userOf(client), UserId.parse(501));
+      expect(reader.read(client), isUserRead(501));
     });
 
-    test('denies an unknown xucred version', () {
+    test('names an unknown xucred version', () {
       final reader = answering(Kernel.macos, struct(76, first: 1, uid: 501));
-      expect(reader.userOf(client), isNull);
+      expect(
+        reader.read(client),
+        isUnread(
+          isA<UnknownXucredVersion>().having((w) => w.version, 'version', 1),
+        ),
+      );
     });
 
-    test('denies nobody', () {
+    test('names a short answer and its length', () {
+      final reader = answering(Kernel.macos, Uint8List(12));
+      expect(
+        reader.read(client),
+        isUnread(
+          isA<ShortAnswer>()
+              .having((w) => w.length, 'length', 12)
+              .having((w) => w.expected, 'expected', 76),
+        ),
+      );
+    });
+
+    test('refuses nobody', () {
       final reader = answering(
         Kernel.macos,
         struct(76, first: 0, uid: 4294967294),
       );
-      expect(reader.userOf(client), isNull);
+      expect(
+        reader.read(client),
+        isUnread(isA<RefusedUid>().having((w) => w.uid, 'uid', 4294967294)),
+      );
     });
   });
 
-  test('another kernel is denied without a read', () {
+  test('another kernel is unread without a read', () {
     final reader = SocketUserReader(
       kernel: Kernel.other,
       readOption: (_, _) => fail('read on an unknown kernel'),
     );
-    expect(reader.userOf(client), isNull);
+    expect(reader.read(client), isUnread(isA<UnsupportedKernel>()));
+  });
+
+  test('userOf is null exactly when read is unread', () {
+    expect(answering(Kernel.linux, Uint8List(0)).userOf(client), isNull);
+    expect(
+      answering(Kernel.linux, struct(12, first: 1, uid: 1000)).userOf(client),
+      UserId.parse(1000),
+    );
   });
 
   group('SocketUserCheck', () {
     final me = UserId.parse(1000)!;
 
+    SocketUserCheck checkSeeing(Uint8List bytes) =>
+        SocketUserCheck.only(me, reader: answering(Kernel.linux, bytes));
+
     test('allows an allowed user', () {
-      final check = SocketUserCheck.only(
-        me,
-        reader: answering(Kernel.linux, struct(12, first: 1, uid: 1000)),
+      expect(
+        checkSeeing(struct(12, first: 1, uid: 1000)).decide(client),
+        isA<Allowed>().having((v) => v.user, 'user', me),
       );
-      expect(check.allows(client), isTrue);
     });
 
-    test('denies another user', () {
-      final check = SocketUserCheck.only(
-        me,
-        reader: answering(Kernel.linux, struct(12, first: 1, uid: 1001)),
+    test('refuses another user, saying who it saw', () {
+      expect(
+        checkSeeing(struct(12, first: 1, uid: 1001)).decide(client),
+        isA<NotAllowed>()
+            .having((v) => v.seen, 'seen', UserId.parse(1001))
+            .having((v) => v.allowed, 'allowed', {me}),
       );
-      expect(check.allows(client), isFalse);
     });
 
-    test('denies a peer whose user cannot be read', () {
-      final check = SocketUserCheck.only(
-        me,
-        reader: answering(Kernel.linux, Uint8List(0)),
+    test("hands on the reader's Unread", () {
+      expect(
+        checkSeeing(Uint8List(0)).decide(client),
+        isUnread(isA<ShortAnswer>()),
       );
-      expect(check.allows(client), isFalse);
+    });
+
+    test('allows is true only for Allowed', () {
+      expect(
+        checkSeeing(struct(12, first: 1, uid: 1000)).allows(client),
+        isTrue,
+      );
+      expect(
+        checkSeeing(struct(12, first: 1, uid: 1001)).allows(client),
+        isFalse,
+      );
+      expect(checkSeeing(Uint8List(0)).allows(client), isFalse);
     });
   });
 
@@ -182,8 +270,11 @@ void main() {
         markTestSkipped('peer credentials are only read on Linux and macOS');
         return;
       }
-      expect(SocketUserReader().userOf(client), UserId.parse(uid));
-      expect(SocketUserCheck.only(UserId.parse(uid)!).allows(client), isTrue);
+      expect(SocketUserReader().read(client), isUserRead(uid));
+      expect(
+        SocketUserCheck.only(UserId.parse(uid)!).decide(client),
+        isA<Allowed>(),
+      );
     },
   );
 }
