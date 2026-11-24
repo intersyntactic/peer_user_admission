@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'socket_user_reader.dart';
+import 'socket_user_verdict.dart';
 import 'user_id.dart';
 
 /// Decides whether a socket's user may connect: only when the kernel names its
@@ -20,9 +21,15 @@ final class SocketUserCheck {
   final Set<UserId> _allowed;
   final SocketUserReader _reader;
 
+  /// Whether the user on the other end of [socket] may connect, and if not,
+  /// why. Admit the peer only on [Allowed].
+  SocketUserVerdict decide(Socket socket) => switch (_reader.read(socket)) {
+    UserRead(:final user) when _allowed.contains(user) => Allowed(user),
+    UserRead(:final user) => NotAllowed(user, _allowed),
+    final Unread unread => unread,
+  };
+
   /// Whether the user on the other end of [socket] is an allowed one.
-  bool allows(Socket socket) {
-    final user = _reader.userOf(socket);
-    return user != null && _allowed.contains(user);
-  }
+  @Deprecated('Use decide, whose verdict says why a peer is refused.')
+  bool allows(Socket socket) => decide(socket) is Allowed;
 }

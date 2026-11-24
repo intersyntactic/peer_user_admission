@@ -1,7 +1,9 @@
 import 'dart:io';
 import 'dart:typed_data';
 
+import 'socket_user_verdict.dart';
 import 'user_id.dart';
+import 'why_unread.dart';
 
 /// The kernels whose peer credentials [SocketUserReader] knows how to read.
 enum Kernel {
@@ -68,43 +70,65 @@ final class SocketUserReader {
   /// The uid sits after one 32-bit field in both structs.
   static const _uidOffset = 4;
 
-  /// The user on the other end of [socket]; null when the kernel does not
-  /// say, or says a user [UserId.parse] refuses, or Linux's configured
-  /// overflow uid.
-  UserId? userOf(Socket socket) {
+  /// The user on the other end of [socket], or [Unread] with why the kernel
+  /// did not name one.
+  SocketUserReading read(Socket socket) {
     try {
       return switch (_kernel) {
         Kernel.linux => _linux(socket),
         Kernel.macos => _macos(socket),
-        Kernel.other => null,
+        Kernel.other => const Unread(UnsupportedKernel()),
       };
-    } on SocketException {
-      return null;
+    } on SocketException catch (exception) {
+      return Unread(ReadFailed(exception));
     }
   }
 
-  UserId? _linux(Socket socket) {
-    final ucred = _read(socket, _linuxLevel, _linuxOption, _ucredLength);
-    if (ucred == null) return null;
-    final uid = ucred.getUint32(_uidOffset, Endian.host);
-    if (uid == _overflowUid()) return null;
-    return UserId.parse(uid);
-  }
+  /// The user on the other end of [socket]; null whenever [read] answers
+  /// [Unread].
+  @Deprecated('Use read, whose Unread says why there is no user.')
+  UserId? userOf(Socket socket) => switch (read(socket)) {
+    UserRead(:final user) => user,
+    Unread() => null,
+  };
 
-  UserId? _macos(Socket socket) {
-    final xucred = _read(socket, _macosLevel, _macosOption, _xucredLength);
-    if (xucred == null) return null;
-    if (xucred.getUint32(0, Endian.host) != _xucredVersion) return null;
-    return UserId.parse(xucred.getUint32(_uidOffset, Endian.host));
-  }
+  SocketUserReading _linux(Socket socket) =>
+      _read(socket, _linuxLevel, _linuxOption, _ucredLength, (ucred) {
+        final uid = ucred.getUint32(_uidOffset, Endian.host);
+        if (uid == _overflowUid()) return Unread(OverflowUid(uid));
+        return _user(uid);
+      });
 
-  /// The option's bytes, or null when fewer than [length] came back. The
-  /// buffer starts as all ones, so a uid the kernel never wrote reads as
-  /// `(uid_t)-1`, which [UserId.parse] refuses, never as root's 0.
-  ByteData? _read(Socket socket, int level, int option, int length) {
+  SocketUserReading _macos(Socket socket) =>
+      _read(socket, _macosLevel, _macosOption, _xucredLength, (xucred) {
+        final version = xucred.getUint32(0, Endian.host);
+        if (version != _xucredVersion) {
+          return Unread(UnknownXucredVersion(version));
+        }
+        return _user(xucred.getUint32(_uidOffset, Endian.host));
+      });
+
+  static SocketUserReading _user(int uid) => switch (UserId.parse(uid)) {
+    final UserId user => UserRead(user),
+    null => Unread(RefusedUid(uid)),
+  };
+
+  /// Reads the option and hands its bytes to [decode], or answers
+  /// [ShortAnswer] when fewer than [length] came back. The buffer starts as
+  /// all ones, so a uid the kernel never wrote reads as `(uid_t)-1`, which
+  /// [UserId.parse] refuses, never as root's 0.
+  SocketUserReading _read(
+    Socket socket,
+    int level,
+    int option,
+    int length,
+    SocketUserReading Function(ByteData struct) decode,
+  ) {
     final buffer = Uint8List(length)..fillRange(0, length, 0xFF);
     final bytes = _readOption(socket, RawSocketOption(level, option, buffer));
-    if (bytes.length < length) return null;
-    return ByteData.sublistView(bytes);
+    if (bytes.length < length) {
+      return Unread(ShortAnswer(length: bytes.length, expected: length));
+    }
+    return decode(ByteData.sublistView(bytes));
   }
 }
