@@ -25,8 +25,17 @@ final class ReadFailed extends WhyUnread {
   /// The operating system's error, or null when the runtime gave none.
   OSError? get osError => exception.osError;
 
+  /// Every run of line breaks, with the spaces around it.
+  static final _lineBreaks = RegExp(
+    '\\s*[\\n\\r\\v\\f\\u0085\\u2028\\u2029]+\\s*',
+  );
+
+  /// The exception's text comes from the runtime and the operating system,
+  /// so its line breaks become spaces to keep this to one line.
   @override
-  String toString() => 'reading the peer credentials failed: $exception';
+  String toString() =>
+      'reading the peer credentials failed: '
+      '${exception.toString().replaceAll(_lineBreaks, ' ')}';
 }
 
 /// The kernel wrote fewer bytes than the credentials struct holds.

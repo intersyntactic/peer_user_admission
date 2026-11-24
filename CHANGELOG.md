@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.1
+
+- `ReadFailed.toString` turns line breaks in the exception's text into
+  spaces, so every verdict prints on one line, as the README says.
+
 ## 0.2.0
 
 - `SocketUserCheck.decide` returns a sealed `SocketUserVerdict`: `Allowed`,
